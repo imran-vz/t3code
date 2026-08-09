@@ -4810,6 +4810,10 @@ function ChatViewContent(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    if (composerRef.current?.getSubmitDisabledReason() !== null) {
+      notifyDirectAnnotationAttached();
+      return;
+    }
     if (activeEnvironmentUnavailable) {
       toastManager.add(
         stackedThreadToast({

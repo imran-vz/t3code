@@ -12,7 +12,7 @@ vi.mock("../SidebarStageBackdrop", () => ({
 
 import { ComposerPrimaryActions, formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
 
-function renderPendingActions(isRunning: boolean) {
+function renderPendingActions(isRunning: boolean, sendDisabledReason: string | null = null) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
@@ -27,7 +27,7 @@ function renderPendingActions(isRunning: boolean) {
       showPlanFollowUpPrompt: false,
       promptHasText: false,
       isSendBusy: false,
-      sendDisabledReason: null,
+      sendDisabledReason,
       isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
@@ -163,5 +163,12 @@ describe("ComposerPrimaryActions", () => {
     expect(renderPendingActions(true)).toContain("size-8 sm:size-7");
     expect(renderStandaloneStop()).toContain("size-8 sm:h-8 sm:w-8");
     expect(renderStandaloneStop()).not.toContain("sm:size-7");
+  });
+
+  it("disables pending-answer submission when the authoritative composer gate is active", () => {
+    const markup = renderPendingActions(false, "Finish or cancel voice input before sending.");
+
+    expect(markup).toContain("disabled");
+    expect(markup).toContain("Submit");
   });
 });

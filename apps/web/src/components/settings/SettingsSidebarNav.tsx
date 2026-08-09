@@ -14,6 +14,7 @@ import {
   GitBranchIcon,
   KeyboardIcon,
   Link2Icon,
+  MicIcon,
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
@@ -34,10 +35,12 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { T3ConnectSidebarAvatar, T3ConnectSidebarSignIn } from "../clerk/T3ConnectSidebarSignIn";
+import { readLocalApi } from "../../localApi";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
+  isSettingsSectionAvailable,
   searchSettings,
-  SETTINGS_SECTION_LABELS,
+  SETTINGS_SECTIONS,
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
@@ -48,6 +51,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/general": Settings2Icon,
   "/settings/appearance": PaletteIcon,
   "/settings/keybindings": KeyboardIcon,
+  "/settings/voice-input": MicIcon,
   "/settings/providers": BotIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
@@ -58,9 +62,9 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
   to: SettingsPath;
   icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
+}> = (Object.keys(SETTINGS_SECTIONS) as SettingsPath[]).map((to) => ({
   to,
-  label: SETTINGS_SECTION_LABELS[to],
+  label: SETTINGS_SECTIONS[to].label,
   icon: SETTINGS_SECTION_ICONS[to],
 }));
 
@@ -77,7 +81,16 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
-  const results = useMemo(() => searchSettings(query), [query]);
+  const hasSpeech = readLocalApi()?.speech !== undefined;
+  const capabilities = useMemo(() => ({ speech: hasSpeech }), [hasSpeech]);
+  const results = useMemo(
+    () => searchSettings(query, undefined, capabilities),
+    [capabilities, query],
+  );
+  const visibleNavItems = useMemo(
+    () => SETTINGS_NAV_ITEMS.filter((item) => isSettingsSectionAvailable(item.to, capabilities)),
+    [capabilities],
+  );
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
 
@@ -269,13 +282,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                           {item.title}
                         </span>
                         <span className="block truncate text-[11px] text-sidebar-muted-foreground/75">
-                          {SETTINGS_SECTION_LABELS[item.to]}
+                          {SETTINGS_SECTIONS[item.to].label}
                         </span>
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))
-              : SETTINGS_NAV_ITEMS.map((item) => {
+              : visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
                   return (

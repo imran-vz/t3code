@@ -26,6 +26,7 @@ const DesktopSettingsPatch = Schema.Struct({
   ),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
   serverExposureMode: Schema.optionalKey(Schema.Literals(["local-only", "network-accessible"])),
+  speechModelId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
@@ -109,6 +110,7 @@ describe("DesktopSettings", () => {
         mainWindowBounds: null,
         mainWindowMaximized: false,
         serverExposureMode: "local-only",
+        speechModelId: null,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
         updateChannel: "nightly",
@@ -138,6 +140,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
+          speechModelId: null,
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
           updateChannel: "latest",
@@ -187,6 +190,34 @@ describe("DesktopSettings", () => {
     ),
   );
 
+  it.effect("persists and clears the selected speech model", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+
+        const selected = yield* settings.setSpeechModelId("moonshine-streaming-medium-q8");
+        assert.isTrue(selected.changed);
+        assert.equal(selected.settings.speechModelId, "moonshine-streaming-medium-q8");
+        assert.equal((yield* settings.load).speechModelId, "moonshine-streaming-medium-q8");
+
+        const noOp = yield* settings.setSpeechModelId("moonshine-streaming-medium-q8");
+        assert.isFalse(noOp.changed);
+
+        const cleared = yield* settings.setSpeechModelId(null);
+        assert.isTrue(cleared.changed);
+        assert.isNull(cleared.settings.speechModelId);
+        assert.deepEqual(
+          yield* decodeDesktopSettingsPatch(
+            yield* fileSystem.readFileString(environment.desktopSettingsPath),
+          ),
+          {},
+        );
+      }),
+    ),
+  );
+
   it.effect("does not persist no-op semantic updates", () =>
     withSettings(
       Effect.gen(function* () {
@@ -204,6 +235,9 @@ describe("DesktopSettings", () => {
         const updateChannel = yield* settings.setUpdateChannel("latest");
         assert.isFalse(updateChannel.changed);
         assert.equal(updateChannel.settings.updateChannelConfiguredByUser, false);
+
+        const speechModel = yield* settings.setSpeechModelId(null);
+        assert.isFalse(speechModel.changed);
       }),
     ),
   );
@@ -245,6 +279,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
+          speechModelId: null,
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
           updateChannel: "latest",
@@ -301,6 +336,7 @@ describe("DesktopSettings", () => {
             mainWindowBounds: null,
             mainWindowMaximized: false,
             serverExposureMode: "network-accessible",
+            speechModelId: null,
             tailscaleServeEnabled: true,
             tailscaleServePort: 8443,
             updateChannel: "nightly",
@@ -349,6 +385,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
+          speechModelId: null,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
           updateChannel: "nightly",
@@ -377,6 +414,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
+          speechModelId: null,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
           updateChannel: "latest",
@@ -404,6 +442,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
+          speechModelId: null,
           tailscaleServeEnabled: true,
           tailscaleServePort: 443,
           updateChannel: "latest",

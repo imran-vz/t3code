@@ -102,7 +102,9 @@ describe("BrowserSession", () => {
       // `clipboard-write` is not a real Electron permission — the async write API
       // uses `clipboard-sanitized-write` — so the stale name must not be granted,
       // and unrelated permissions stay denied.
-      for (const permission of ["clipboard-write", "midi"]) {
+      // Preview partitions host untrusted sites and must never inherit the main
+      // renderer's microphone grant.
+      for (const permission of ["clipboard-write", "media", "midi"]) {
         assert.isFalse(requestAllows(permission), `request handler should deny ${permission}`);
         assert.isFalse(
           checkHandler(null, permission) as boolean,

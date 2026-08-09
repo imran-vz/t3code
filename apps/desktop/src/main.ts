@@ -50,6 +50,9 @@ import * as DesktopServerExposure from "./backend/DesktopServerExposure.ts";
 import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
 import * as DesktopSavedEnvironments from "./settings/DesktopSavedEnvironments.ts";
 import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
+import * as DesktopSpeech from "./speech/DesktopSpeech.ts";
+import * as DesktopSpeechPlatform from "./speech/DesktopSpeechPlatform.ts";
+import * as TranscribeCppWorker from "./speech/TranscribeCppWorker.ts";
 import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
@@ -151,9 +154,16 @@ const desktopPreviewLayer = PreviewManager.layer.pipe(
   Layer.provideMerge(desktopFoundationLayer),
 );
 
+const desktopSpeechLayer = DesktopSpeech.layer().pipe(
+  Layer.provideMerge(TranscribeCppWorker.layer),
+  Layer.provideMerge(DesktopSpeechPlatform.layer),
+  Layer.provideMerge(desktopFoundationLayer),
+);
+
 const desktopWindowLayer = DesktopWindow.layer.pipe(
   Layer.provideMerge(desktopServerExposureLayer),
   Layer.provideMerge(desktopPreviewLayer),
+  Layer.provideMerge(desktopSpeechLayer),
 );
 
 // Pool layer instantiates the backend factory once for the Windows

@@ -6,6 +6,7 @@ import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { DESKTOP_MICROPHONE_USAGE_DESCRIPTION } from "@t3tools/shared/desktopSpeechConstants";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -17,8 +18,25 @@ import {
   type WebAssetBrand,
 } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
+import {
+  assertPackagedDesktopSpeechRuntime,
+  assertTranscribeCppNativeArtifacts,
+  DESKTOP_SPEECH_WORKER_ASAR_UNPACK,
+  TRANSCRIBE_CPP_ASAR_UNPACK,
+} from "./lib/desktop-speech-runtime.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+
+export {
+  assertPackagedDesktopSpeechRuntime,
+  assertTranscribeCppNativeArtifacts,
+  DESKTOP_SPEECH_WORKER_ASAR_UNPACK,
+  PackagedDesktopSpeechRuntimeMissingError,
+  resolveTranscribeCppNativeArtifacts,
+  TRANSCRIBE_CPP_ASAR_UNPACK,
+  TranscribeCppNativeArtifactMissingError,
+  type TranscribeCppNativeArtifact,
+} from "./lib/desktop-speech-runtime.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -859,6 +877,8 @@ ${associatedDomains}
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>
 `;
@@ -1544,10 +1564,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
-    // Only the Windows WSL backend needs files outside the asar (see
-    // WINDOWS_ASAR_UNPACK); macOS and Linux stay packed — smart unpack
-    // extracts native libraries, which fff-node finds in app.asar.unpacked.
-    ...(platform === "win" ? { asarUnpack: [...WINDOWS_ASAR_UNPACK] } : {}),
+    // utilityProcess and transcribe-cpp both resolve physical runtime files,
+    // so the worker entry and native package stay outside ASAR on every target.
+    // Windows additionally unpacks the dependencies used by its WSL backend.
+    asarUnpack: [
+      ...DESKTOP_SPEECH_WORKER_ASAR_UNPACK,
+      ...TRANSCRIBE_CPP_ASAR_UNPACK,
+      ...(platform === "win" ? WINDOWS_ASAR_UNPACK : []),
+    ],
     extraResources: DESKTOP_EXTRA_RESOURCES,
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
@@ -1568,6 +1592,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      extendInfo: {
+        NSMicrophoneUsageDescription: DESKTOP_MICROPHONE_USAGE_DESCRIPTION,
+      },
       protocols: [
         {
           name: "T3 Code",
@@ -1969,6 +1996,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     }),
     { label: "vp install --prod", verbose: options.verbose },
   );
+  yield* assertTranscribeCppNativeArtifacts(stageAppDir, options.platform, options.arch);
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
 
   // WSL is Windows-only, so only the Windows artifact carries the Linux backend
@@ -2055,6 +2083,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       arch: options.arch,
     });
   }
+
+  yield* assertPackagedDesktopSpeechRuntime(stageDistDir, options.platform, options.arch);
 
   const stageEntries = yield* fs.readDirectory(stageDistDir);
   yield* fs.makeDirectory(options.outputDir, { recursive: true });

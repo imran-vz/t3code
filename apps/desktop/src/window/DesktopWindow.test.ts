@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { DesktopSpeechSessionId, DesktopSpeechState } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -45,6 +46,7 @@ import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/cha
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as DesktopSpeech from "../speech/DesktopSpeech.ts";
 
 const environmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -58,9 +60,27 @@ const environmentInput = {
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
+const activeSpeechSessionId = Schema.decodeUnknownSync(DesktopSpeechSessionId)("renderer-session");
+const idleSpeechState = Schema.decodeUnknownSync(DesktopSpeechState)({
+  availability: { type: "unsupported", reason: "unsupported-platform" },
+  models: [],
+  selectedModelId: null,
+  session: { type: "idle" },
+  preview: { committed: "", tentative: "", revision: 0 },
+});
+const listeningSpeechState = Schema.decodeUnknownSync(DesktopSpeechState)({
+  availability: { type: "supported" },
+  models: [],
+  selectedModelId: null,
+  session: { type: "listening", sessionId: activeSpeechSessionId },
+  preview: { committed: "", tentative: "", revision: 0 },
+});
+
 function makeFakeBrowserWindow() {
   const windowListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
+  const setPermissionRequestHandler = vi.fn();
+  const setPermissionCheckHandler = vi.fn();
   const webContents = {
     copyImageAt: vi.fn(),
     getURL: vi.fn(() => "t3code-dev://app/"),
@@ -73,6 +93,10 @@ function makeFakeBrowserWindow() {
     reload: vi.fn(),
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
+    session: {
+      setPermissionRequestHandler,
+      setPermissionCheckHandler,
+    },
     setWindowOpenHandler: vi.fn(),
   };
 
@@ -116,6 +140,8 @@ function makeFakeBrowserWindow() {
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
+    setPermissionCheckHandler,
+    setPermissionRequestHandler,
     setAutoHideCursor: window.setAutoHideCursor,
     webContentsListeners,
     windowListeners,
@@ -186,6 +212,8 @@ function makeTestLayer(input: {
     bounds: DesktopAppSettings.DesktopWindowBounds,
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
+  readonly speechState?: DesktopSpeech.DesktopSpeech["Service"]["getState"];
+  readonly cancelSpeech?: DesktopSpeech.DesktopSpeech["Service"]["cancel"];
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -212,6 +240,7 @@ function makeTestLayer(input: {
         return { settings: desktopSettings, changed };
       }),
     setServerExposureMode: () => Effect.die("unexpected server exposure update"),
+    setSpeechModelId: () => Effect.die("unexpected speech model change"),
     setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
     setUpdateChannel: () => Effect.die("unexpected update channel change"),
     setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
@@ -259,6 +288,10 @@ function makeTestLayer(input: {
         } satisfies ElectronShell.ElectronShell["Service"]),
         electronThemeLayer,
         electronWindowLayer,
+        Layer.mock(DesktopSpeech.DesktopSpeech)({
+          getState: input.speechState ?? Effect.succeed(idleSpeechState),
+          cancel: input.cancelSpeech ?? (() => Effect.die("unexpected speech cancellation")),
+        }),
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
@@ -353,6 +386,9 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           } satisfies ElectronShell.ElectronShell["Service"]),
           electronThemeLayer,
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
+          Layer.mock(DesktopSpeech.DesktopSpeech)({
+            getState: Effect.succeed(idleSpeechState),
+          }),
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
             setMainWindow: () => Effect.void,
@@ -404,6 +440,106 @@ describe("DesktopWindow", () => {
       }),
     );
   });
+
+  it.effect("grants required permissions only to the trusted main renderer", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.createMain;
+      }).pipe(Effect.provide(layer));
+
+      type PermissionRequestHandler = NonNullable<
+        Parameters<Electron.Session["setPermissionRequestHandler"]>[0]
+      >;
+      type PermissionCheckHandler = NonNullable<
+        Parameters<Electron.Session["setPermissionCheckHandler"]>[0]
+      >;
+      const requestHandler = fakeWindow.setPermissionRequestHandler.mock.calls[0]?.[0] as
+        | PermissionRequestHandler
+        | undefined;
+      const checkHandler = fakeWindow.setPermissionCheckHandler.mock.calls[0]?.[0] as
+        | PermissionCheckHandler
+        | undefined;
+      assert.isFunction(requestHandler);
+      assert.isFunction(checkHandler);
+      const handleRequest = requestHandler as PermissionRequestHandler;
+      const handleCheck = checkHandler as PermissionCheckHandler;
+
+      const trustedUrl = "t3code-dev://app/settings/voice-input";
+      const trustedSecurityOrigin = "t3code-dev://app";
+      const trustedRequest = {
+        isMainFrame: true,
+        requestingUrl: trustedUrl,
+        mediaTypes: ["audio"],
+        securityOrigin: trustedSecurityOrigin,
+      } satisfies Electron.MediaAccessPermissionRequest;
+      const requestAllows = (
+        webContents: Electron.WebContents,
+        permission: Parameters<PermissionRequestHandler>[1],
+        details: Parameters<PermissionRequestHandler>[3],
+      ) => {
+        let granted: boolean | undefined;
+        handleRequest(
+          webContents,
+          permission,
+          (value) => {
+            granted = value;
+          },
+          details,
+        );
+        assert.isDefined(granted);
+        return granted;
+      };
+
+      assert.isTrue(requestAllows(fakeWindow.window.webContents, "media", trustedRequest));
+      assert.isTrue(requestAllows(fakeWindow.window.webContents, "clipboard-read", trustedRequest));
+      assert.isFalse(requestAllows({} as Electron.WebContents, "media", trustedRequest));
+      assert.isFalse(requestAllows(fakeWindow.window.webContents, "geolocation", trustedRequest));
+      assert.isFalse(
+        requestAllows(fakeWindow.window.webContents, "media", {
+          ...trustedRequest,
+          requestingUrl: "t3code-dev://app.evil/",
+        }),
+      );
+
+      const trustedCheck = {
+        isMainFrame: true,
+        requestingUrl: trustedUrl,
+        securityOrigin: trustedSecurityOrigin,
+        mediaType: "audio",
+      } satisfies Electron.PermissionCheckHandlerHandlerDetails;
+      assert.isTrue(
+        handleCheck(fakeWindow.window.webContents, "media", trustedSecurityOrigin, trustedCheck),
+      );
+      assert.isTrue(
+        handleCheck(
+          fakeWindow.window.webContents,
+          "clipboard-read",
+          trustedSecurityOrigin,
+          trustedCheck,
+        ),
+      );
+      assert.isFalse(handleCheck(null, "media", trustedSecurityOrigin, trustedCheck));
+      assert.isFalse(
+        handleCheck(fakeWindow.window.webContents, "media", "t3code-dev://app.evil", trustedCheck),
+      );
+      assert.isFalse(
+        handleCheck(fakeWindow.window.webContents, "media", trustedSecurityOrigin, {
+          ...trustedCheck,
+          mediaType: "video",
+        }),
+      );
+    }),
+  );
 
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {
@@ -971,6 +1107,38 @@ describe("DesktopWindow", () => {
         yield* TestClock.adjust(250);
         assert.equal(fakeWindow.loadURL.mock.calls.length, 2);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("cancels active speech when the main renderer process exits", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const cancelled = yield* Deferred.make<void>();
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        speechState: Effect.succeed(listeningSpeechState),
+        cancelSpeech: (candidate) =>
+          Effect.gen(function* () {
+            assert.equal(candidate, activeSpeechSessionId);
+            yield* Deferred.succeed(cancelled, undefined);
+            return { type: "accepted" } as const;
+          }),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const renderProcessGone = fakeWindow.webContentsListeners.get("render-process-gone");
+        if (!renderProcessGone) {
+          return yield* Effect.die("render-process-gone listener was not registered");
+        }
+        renderProcessGone({}, { reason: "crashed", exitCode: 9 });
+        yield* Deferred.await(cancelled);
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -147,6 +147,43 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.UPDATE_STATE_CHANNEL, wrappedListener);
     };
   },
+  speech: {
+    getState: () => ipcRenderer.invoke(IpcChannels.SPEECH_GET_STATE_CHANNEL),
+    selectModel: (modelId) =>
+      ipcRenderer.invoke(IpcChannels.SPEECH_SELECT_MODEL_CHANNEL, { modelId }),
+    downloadModel: (modelId) =>
+      ipcRenderer.invoke(IpcChannels.SPEECH_DOWNLOAD_MODEL_CHANNEL, { modelId }),
+    cancelDownload: (modelId) =>
+      ipcRenderer.invoke(IpcChannels.SPEECH_CANCEL_DOWNLOAD_CHANNEL, { modelId }),
+    removeModel: (modelId) =>
+      ipcRenderer.invoke(IpcChannels.SPEECH_REMOVE_MODEL_CHANNEL, { modelId }),
+    start: () => ipcRenderer.invoke(IpcChannels.SPEECH_START_CHANNEL, {}),
+    pushAudio: (input) => ipcRenderer.invoke(IpcChannels.SPEECH_PUSH_AUDIO_CHANNEL, input),
+    stop: (sessionId) => ipcRenderer.invoke(IpcChannels.SPEECH_STOP_CHANNEL, { sessionId }),
+    cancel: (sessionId) => ipcRenderer.invoke(IpcChannels.SPEECH_CANCEL_CHANNEL, { sessionId }),
+    onStateChange: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+        if (typeof state !== "object" || state === null) return;
+        listener(state as Parameters<typeof listener>[0]);
+      };
+
+      ipcRenderer.on(IpcChannels.SPEECH_STATE_CHANNEL, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.SPEECH_STATE_CHANNEL, wrappedListener);
+      };
+    },
+    onPreviewChange: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, preview: unknown) => {
+        if (typeof preview !== "object" || preview === null) return;
+        listener(preview as Parameters<typeof listener>[0]);
+      };
+
+      ipcRenderer.on(IpcChannels.SPEECH_PREVIEW_CHANNEL, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.SPEECH_PREVIEW_CHANNEL, wrappedListener);
+      };
+    },
+  },
   preview: {
     createTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CREATE_TAB_CHANNEL, { tabId }),
     closeTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL, { tabId }),

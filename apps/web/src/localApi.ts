@@ -1,12 +1,13 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
 
-import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
-import { showContextMenuFallback } from "./contextMenuFallback";
 import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientPersistenceStorage";
+import { showContextMenuFallback } from "./contextMenuFallback";
+import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
 
 let cachedApi: LocalApi | undefined;
 
 function createBrowserLocalApi(): LocalApi {
+  const speech = window.desktopBridge?.speech;
   return {
     dialogs: {
       pickFolder: async (options) => {
@@ -58,6 +59,7 @@ function createBrowserLocalApi(): LocalApi {
         writeBrowserClientSettings(settings);
       },
     },
+    ...(speech === undefined ? {} : { speech }),
   };
 }
 

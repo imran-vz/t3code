@@ -1,12 +1,18 @@
 import { assert, describe, it } from "vite-plus/test";
+import { DESKTOP_MICROPHONE_USAGE_DESCRIPTION as SHARED_MICROPHONE_USAGE_DESCRIPTION } from "@t3tools/shared/desktopSpeechConstants";
 
 import {
+  DESKTOP_MICROPHONE_USAGE_DESCRIPTION,
   makeDevelopmentLauncherScript,
   resolveElectronBinaryPath,
   resolveMacLauncherPaths,
 } from "./electron-launcher.mjs";
 
 describe("electron development launcher", () => {
+  it("declares the microphone purpose shown by macOS in development", () => {
+    assert.equal(DESKTOP_MICROPHONE_USAGE_DESCRIPTION, SHARED_MICROPHONE_USAGE_DESCRIPTION);
+  });
+
   it("uses captured values only as fallbacks for a live runner environment", () => {
     const script = makeDevelopmentLauncherScript({
       electronBinaryPath: "/repo/node_modules/electron/Electron",

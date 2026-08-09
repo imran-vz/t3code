@@ -2,6 +2,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
   | "/settings/keybindings"
+  | "/settings/voice-input"
   | "/settings/providers"
   | "/settings/source-control"
   | "/settings/connections"
@@ -14,19 +15,40 @@ export interface SettingsSearchItem {
   readonly targetId?: string;
 }
 
+export type SettingsCapability = "speech";
+
+export interface SettingsCapabilities {
+  readonly speech: boolean;
+}
+
 /**
- * Section labels in sidebar order. The sidebar nav and the search-result
- * subtitles both render from this record, so each label exists once.
+ * Settings sections in sidebar order. Navigation and search both use this
+ * catalog for labels and capability gating.
  */
-export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/general": "General",
-  "/settings/appearance": "Appearance",
-  "/settings/keybindings": "Keybindings",
-  "/settings/providers": "Providers",
-  "/settings/source-control": "Source Control",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
+export const SETTINGS_SECTIONS: Readonly<
+  Record<SettingsPath, { readonly label: string; readonly capability?: SettingsCapability }>
+> = {
+  "/settings/general": { label: "General" },
+  "/settings/appearance": { label: "Appearance" },
+  "/settings/keybindings": { label: "Keybindings" },
+  "/settings/voice-input": { label: "Voice Input", capability: "speech" },
+  "/settings/providers": { label: "Providers" },
+  "/settings/source-control": { label: "Source Control" },
+  "/settings/connections": { label: "Connections" },
+  "/settings/archived": { label: "Archive" },
 };
+
+export const SETTINGS_SECTION_LABELS = Object.fromEntries(
+  Object.entries(SETTINGS_SECTIONS).map(([path, section]) => [path, section.label]),
+) as Readonly<Record<SettingsPath, string>>;
+
+export function isSettingsSectionAvailable(
+  path: SettingsPath,
+  capabilities: SettingsCapabilities,
+): boolean {
+  const capability = SETTINGS_SECTIONS[path].capability;
+  return capability === undefined || capabilities[capability];
+}
 
 /**
  * Every searchable setting, in result order. This catalog is the single
@@ -175,6 +197,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/keybindings",
   },
   {
+    id: "voice-input",
+    title: "Voice input",
+    to: "/settings/voice-input",
+  },
+  {
     id: "providers",
     title: "Providers",
     to: "/settings/providers",
@@ -215,7 +242,7 @@ export function searchableSetting(id: SettingsSearchItemId): {
   return { id: anchorId, title };
 }
 
-function normalizeSearchText(value: string): string {
+export function normalizeSearchText(value: string): string {
   return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -227,9 +254,14 @@ function normalizeSearchText(value: string): string {
 export function searchSettings(
   query: string,
   items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS,
+  capabilities: SettingsCapabilities = { speech: false },
 ): ReadonlyArray<SettingsSearchItem> {
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
 
-  return items.filter((item) => normalizeSearchText(item.title).includes(normalizedQuery));
+  return items.filter(
+    (item) =>
+      isSettingsSectionAvailable(item.to, capabilities) &&
+      normalizeSearchText(item.title).includes(normalizedQuery),
+  );
 }

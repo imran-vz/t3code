@@ -77,6 +77,12 @@ describe("LocalApi", () => {
     expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
   });
 
+  it("does not expose speech in an ordinary browser", async () => {
+    const { createLocalApi } = await import("./localApi");
+
+    expect(createLocalApi().speech).toBeUndefined();
+  });
+
   it("delegates host capabilities and persistence to the desktop bridge", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     const pickFolder = vi.fn().mockResolvedValue("/tmp/project");
@@ -114,5 +120,25 @@ describe("LocalApi", () => {
 
     await api.persistence.setClientSettings(settings);
     await expect(api.persistence.getClientSettings()).resolves.toEqual(settings);
+  });
+
+  it("passes the desktop speech bridge through without wrapper-level ordering", async () => {
+    const speechBridge = {
+      getState: vi.fn(),
+      selectModel: vi.fn(),
+      downloadModel: vi.fn(),
+      cancelDownload: vi.fn(),
+      removeModel: vi.fn(),
+      start: vi.fn(),
+      pushAudio: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      onStateChange: vi.fn(),
+      onPreviewChange: vi.fn(),
+    };
+    testWindow().desktopBridge = { speech: speechBridge } as unknown as DesktopBridge;
+
+    const { createLocalApi } = await import("./localApi");
+    expect(createLocalApi().speech).toBe(speechBridge);
   });
 });

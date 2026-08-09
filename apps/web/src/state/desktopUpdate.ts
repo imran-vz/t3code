@@ -8,15 +8,11 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { Atom } from "effect/unstable/reactivity";
 
 type DesktopUpdateBridge = Pick<DesktopBridge, "getUpdateState" | "onUpdateState">;
-
 const INITIAL_STATE_READ_ATTEMPT_COUNT = 3;
 
 export class DesktopUpdateStateReadError extends Schema.TaggedErrorClass<DesktopUpdateStateReadError>()(
   "DesktopUpdateStateReadError",
-  {
-    attemptCount: Schema.Number,
-    cause: Schema.Defect(),
-  },
+  { attemptCount: Schema.Number, cause: Schema.Defect() },
 ) {
   override get message(): string {
     return `Failed to read the initial desktop update state after ${this.attemptCount} attempts.`;
@@ -35,7 +31,6 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
         Queue.offerUnsafe(queue, null);
         return yield* Effect.never;
       }
-
       let receivedUpdate = false;
       yield* Effect.acquireRelease(
         Effect.sync(() =>
@@ -46,7 +41,6 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
         ),
         (unsubscribe) => Effect.sync(unsubscribe),
       );
-
       const initialState = yield* Effect.tryPromise({
         try: () => bridge.getUpdateState(),
         catch: (cause) =>
@@ -56,23 +50,18 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
           }),
       }).pipe(
         Effect.retry({ times: INITIAL_STATE_READ_ATTEMPT_COUNT - 1 }),
-        Effect.catchTags({
-          DesktopUpdateStateReadError: (error) =>
-            Effect.logError(error.message, {
-              error,
-              errorTag: error._tag,
-              attemptCount: error.attemptCount,
-            }).pipe(Effect.as(null)),
-        }),
+        Effect.catchTag("DesktopUpdateStateReadError", (error) =>
+          Effect.logError(error.message, {
+            error,
+            errorTag: error._tag,
+            attemptCount: error.attemptCount,
+          }).pipe(Effect.as(null)),
+        ),
       );
-      if (!receivedUpdate && initialState !== null) {
-        Queue.offerUnsafe(queue, initialState);
-      }
-
+      if (!receivedUpdate && initialState !== null) Queue.offerUnsafe(queue, initialState);
       return yield* Effect.never;
     }),
   );
-
   return Atom.make(updates, { initialValue: null }).pipe(
     Atom.keepAlive,
     Atom.withLabel("desktop:update-state"),

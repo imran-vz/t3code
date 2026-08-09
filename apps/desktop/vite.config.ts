@@ -80,5 +80,14 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preview-pip-preload.ts"],
     },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: {
+        "speech-worker": "src/speech/worker/main.ts",
+      },
+    },
   ],
 });

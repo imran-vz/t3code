@@ -34,6 +34,7 @@ import {
   FOCUS_COMMAND,
   $getRoot,
   HISTORY_MERGE_TAG,
+  HISTORY_PUSH_TAG,
   DecoratorNode,
   type ElementNode,
   type LexicalNode,
@@ -854,6 +855,23 @@ function $setComposerEditorPrompt(
   }
 }
 
+function $patchComposerEditorTrailingText(previousValue: string, value: string): boolean {
+  let unchangedPrefixLength = 0;
+  const comparableLength = Math.min(previousValue.length, value.length);
+  while (
+    unchangedPrefixLength < comparableLength &&
+    previousValue[unchangedPrefixLength] === value[unchangedPrefixLength]
+  ) {
+    unchangedPrefixLength += 1;
+  }
+
+  $setSelectionRangeAtComposerOffsets(unchangedPrefixLength, previousValue.length);
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || $selectionTouchesInlineToken(selection)) return false;
+  selection.insertText(value.slice(unchangedPrefixLength));
+  return true;
+}
+
 function collectTerminalContextIds(node: LexicalNode): string[] {
   if (node instanceof ComposerTerminalContextNode) {
     return [node.__context.id];
@@ -879,6 +897,7 @@ export interface ComposerPromptEditorHandle {
 interface ComposerPromptEditorProps {
   value: string;
   cursor: number;
+  controlledUpdateHistoryMode?: "push" | "merge";
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
@@ -1528,6 +1547,7 @@ function ComposerSurroundSelectionPlugin(props: {
 function ComposerPromptEditorInner({
   value,
   cursor,
+  controlledUpdateHistoryMode,
   terminalContexts,
   skills,
   disabled,
@@ -1601,20 +1621,42 @@ function ComposerPromptEditorInner({
     }
 
     isApplyingControlledUpdateRef.current = true;
-    editor.update(() => {
-      const shouldRewriteEditorState =
-        previousSnapshot.value !== value || contextsChanged || skillsChanged;
-      if (shouldRewriteEditorState) {
-        $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
-      }
-      if (shouldRewriteEditorState || isFocused) {
-        $setSelectionAtComposerOffset(normalizedCursor);
-      }
-    });
+    editor.update(
+      () => {
+        const shouldRewriteEditorState =
+          previousSnapshot.value !== value || contextsChanged || skillsChanged;
+        if (shouldRewriteEditorState) {
+          const patchedSpeechTail =
+            controlledUpdateHistoryMode !== undefined &&
+            !contextsChanged &&
+            !skillsChanged &&
+            $patchComposerEditorTrailingText(previousSnapshot.value, value);
+          if (!patchedSpeechTail) {
+            $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
+          }
+        }
+        if (shouldRewriteEditorState || isFocused) {
+          $setSelectionAtComposerOffset(normalizedCursor);
+        }
+      },
+      controlledUpdateHistoryMode === undefined
+        ? undefined
+        : {
+            tag: controlledUpdateHistoryMode === "push" ? HISTORY_PUSH_TAG : HISTORY_MERGE_TAG,
+          },
+    );
     queueMicrotask(() => {
       isApplyingControlledUpdateRef.current = false;
     });
-  }, [cursor, editor, skillsSignature, terminalContexts, terminalContextsSignature, value]);
+  }, [
+    controlledUpdateHistoryMode,
+    cursor,
+    editor,
+    skillsSignature,
+    terminalContexts,
+    terminalContextsSignature,
+    value,
+  ]);
 
   const focusAt = useCallback(
     (nextCursor: number) => {
@@ -1790,6 +1832,7 @@ function ComposerPromptEditorInner({
 export function ComposerPromptEditor({
   value,
   cursor,
+  controlledUpdateHistoryMode,
   terminalContexts,
   skills,
   disabled,
@@ -1828,6 +1871,7 @@ export function ComposerPromptEditor({
       <ComposerPromptEditorInner
         value={value}
         cursor={cursor}
+        {...(controlledUpdateHistoryMode ? { controlledUpdateHistoryMode } : {})}
         terminalContexts={terminalContexts}
         skills={skills}
         disabled={disabled}

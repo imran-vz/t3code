@@ -19,6 +19,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/channels.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import * as DesktopSpeech from "../speech/DesktopSpeech.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -55,7 +56,8 @@ type DesktopWindowRuntimeServices =
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
   | ElectronWindow.ElectronWindow
-  | PreviewManager.PreviewManager;
+  | PreviewManager.PreviewManager
+  | DesktopSpeech.DesktopSpeech;
 
 export type DesktopWindowError =
   | ElectronWindow.ElectronWindowCreateError
@@ -174,10 +176,88 @@ export function isSameOriginRendererNavigation(input: {
   readonly navigationUrl: string;
 }): boolean {
   try {
-    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+    const applicationUrl = new URL(input.applicationUrl);
+    const navigationUrl = new URL(input.navigationUrl);
+    return (
+      applicationUrl.username === "" &&
+      applicationUrl.password === "" &&
+      navigationUrl.username === "" &&
+      navigationUrl.password === "" &&
+      applicationUrl.protocol === navigationUrl.protocol &&
+      applicationUrl.hostname === navigationUrl.hostname &&
+      applicationUrl.port === navigationUrl.port
+    );
   } catch {
     return false;
   }
+}
+
+function isTrustedRendererUrl(applicationUrl: string, candidateUrl: string | undefined): boolean {
+  return (
+    candidateUrl !== undefined &&
+    isSameOriginRendererNavigation({ applicationUrl, navigationUrl: candidateUrl })
+  );
+}
+
+const ALLOWED_MAIN_WINDOW_PERMISSIONS: ReadonlySet<string> = new Set([
+  "clipboard-read",
+  "clipboard-sanitized-write",
+  "fullscreen",
+  "local-fonts",
+  "notifications",
+]);
+
+function isTrustedMainWindowPermissionRequest(input: {
+  readonly applicationUrl: string;
+  readonly mainWebContents: Electron.WebContents;
+  readonly requestingWebContents: Electron.WebContents | null;
+  readonly permission: string;
+  readonly details: Electron.PermissionRequest;
+}): boolean {
+  if (input.requestingWebContents !== input.mainWebContents) {
+    return false;
+  }
+  const details = input.details as Electron.PermissionRequest & {
+    readonly securityOrigin?: string;
+  };
+  const trustedRequest =
+    details.isMainFrame === true &&
+    isTrustedRendererUrl(input.applicationUrl, details.requestingUrl) &&
+    isTrustedRendererUrl(input.applicationUrl, details.securityOrigin);
+  if (!trustedRequest) {
+    return false;
+  }
+  if (input.permission !== "media") {
+    return ALLOWED_MAIN_WINDOW_PERMISSIONS.has(input.permission);
+  }
+  const mediaDetails = input.details as Electron.MediaAccessPermissionRequest;
+  return mediaDetails.mediaTypes?.length === 1 && mediaDetails.mediaTypes[0] === "audio";
+}
+
+function isTrustedMainWindowPermissionCheck(input: {
+  readonly applicationUrl: string;
+  readonly mainWebContents: Electron.WebContents;
+  readonly requestingWebContents: Electron.WebContents | null;
+  readonly permission: string;
+  readonly requestingOrigin: string;
+  readonly details: Electron.PermissionCheckHandlerHandlerDetails;
+}): boolean {
+  if (input.requestingWebContents !== input.mainWebContents) {
+    return false;
+  }
+  const trustedCheck =
+    input.details.isMainFrame === true &&
+    isTrustedRendererUrl(input.applicationUrl, input.requestingOrigin) &&
+    isTrustedRendererUrl(input.applicationUrl, input.details.requestingUrl) &&
+    isTrustedRendererUrl(input.applicationUrl, input.details.securityOrigin) &&
+    (input.details.embeddingOrigin === undefined ||
+      isTrustedRendererUrl(input.applicationUrl, input.details.embeddingOrigin));
+  if (!trustedCheck) {
+    return false;
+  }
+  return input.permission === "media"
+    ? input.details.mediaType === "audio"
+    : ALLOWED_MAIN_WINDOW_PERMISSIONS.has(input.permission);
 }
 
 export function isRetryableDevelopmentRendererLoadFailure(input: {
@@ -261,6 +341,7 @@ export const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const previewManager = yield* PreviewManager.PreviewManager;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopSpeech = yield* DesktopSpeech.DesktopSpeech;
   // Window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
@@ -357,6 +438,31 @@ export const make = Effect.gen(function* () {
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
     }
+    const mainWindowSession = window.webContents.session;
+    mainWindowSession.setPermissionRequestHandler(
+      (requestingWebContents, permission, callback, details) => {
+        callback(
+          isTrustedMainWindowPermissionRequest({
+            applicationUrl,
+            mainWebContents: window.webContents,
+            requestingWebContents,
+            permission,
+            details,
+          }),
+        );
+      },
+    );
+    mainWindowSession.setPermissionCheckHandler(
+      (requestingWebContents, permission, requestingOrigin, details) =>
+        isTrustedMainWindowPermissionCheck({
+          applicationUrl,
+          mainWebContents: window.webContents,
+          requestingWebContents,
+          permission,
+          requestingOrigin,
+          details,
+        }),
+    );
     let boundsPersistFiber: Fiber.Fiber<void, never> | undefined;
     let pendingBoundsPersistFiber: Fiber.Fiber<void, never> | undefined;
     let boundsPersistenceEnabled = persistedBounds === null || restoredPersistedBounds;
@@ -658,6 +764,10 @@ export const make = Effect.gen(function* () {
       // that dies immediately on boot cannot reload-loop forever.
       runFork(
         Effect.gen(function* () {
+          const speechState = yield* desktopSpeech.getState;
+          if (speechState.session.type !== "idle" && speechState.session.sessionId !== null) {
+            yield* desktopSpeech.cancel(speechState.session.sessionId).pipe(Effect.ignore);
+          }
           const now = yield* Clock.currentTimeMillis;
           rendererRecoveryTimestamps = rendererRecoveryTimestamps.filter(
             (timestamp) => now - timestamp < RENDERER_RECOVERY_WINDOW_MS,

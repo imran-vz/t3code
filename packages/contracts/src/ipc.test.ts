@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 
+import type { DesktopBridge, DesktopSpeechBridge, LocalApi } from "./ipc.ts";
 import { DesktopEnvironmentBootstrapSchema } from "./ipc.ts";
 
 describe("DesktopEnvironmentBootstrapSchema", () => {
@@ -34,5 +35,12 @@ describe("DesktopEnvironmentBootstrapSchema", () => {
         wsBaseUrl: null,
       }).runningDistro,
     ).toBeNull();
+  });
+});
+
+describe("desktop speech IPC capability", () => {
+  it("exposes the desktop bridge and keeps the LocalApi capability optional", () => {
+    expectTypeOf<DesktopBridge["speech"]>().toEqualTypeOf<DesktopSpeechBridge>();
+    expectTypeOf<LocalApi["speech"]>().toEqualTypeOf<DesktopSpeechBridge | undefined>();
   });
 });

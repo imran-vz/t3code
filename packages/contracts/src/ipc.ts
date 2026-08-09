@@ -100,6 +100,21 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type {
+  DesktopSpeechAudioInput,
+  DesktopSpeechAudioResult,
+  DesktopSpeechCancelDownloadResult,
+  DesktopSpeechCancelResult,
+  DesktopSpeechDownloadModelResult,
+  DesktopSpeechModelId,
+  DesktopSpeechPreviewDelta,
+  DesktopSpeechRemoveModelResult,
+  DesktopSpeechSelectModelResult,
+  DesktopSpeechSessionId,
+  DesktopSpeechStartResult,
+  DesktopSpeechState,
+  DesktopSpeechStopResult,
+} from "./speech.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -1063,6 +1078,22 @@ export interface DesktopBridge {
    * Electron desktop build; web builds have `preview === undefined`.
    */
   preview?: DesktopPreviewBridge;
+  /** Desktop-local speech inference and model management. */
+  speech: DesktopSpeechBridge;
+}
+
+export interface DesktopSpeechBridge {
+  getState: () => Promise<DesktopSpeechState>;
+  selectModel: (modelId: DesktopSpeechModelId) => Promise<DesktopSpeechSelectModelResult>;
+  downloadModel: (modelId: DesktopSpeechModelId) => Promise<DesktopSpeechDownloadModelResult>;
+  cancelDownload: (modelId: DesktopSpeechModelId) => Promise<DesktopSpeechCancelDownloadResult>;
+  removeModel: (modelId: DesktopSpeechModelId) => Promise<DesktopSpeechRemoveModelResult>;
+  start: () => Promise<DesktopSpeechStartResult>;
+  pushAudio: (input: DesktopSpeechAudioInput) => Promise<DesktopSpeechAudioResult>;
+  stop: (sessionId: DesktopSpeechSessionId) => Promise<DesktopSpeechStopResult>;
+  cancel: (sessionId: DesktopSpeechSessionId) => Promise<DesktopSpeechCancelResult>;
+  onStateChange: (listener: (state: DesktopSpeechState) => void) => () => void;
+  onPreviewChange: (listener: (preview: DesktopSpeechPreviewDelta) => void) => () => void;
 }
 
 export interface DesktopPreviewBridge {
@@ -1165,6 +1196,8 @@ export interface LocalApi {
     getClientSettings: () => Promise<ClientSettings | null>;
     setClientSettings: (settings: ClientSettings) => Promise<void>;
   };
+  /** Local-only desktop capability; absent in ordinary browser builds. */
+  speech?: DesktopSpeechBridge;
 }
 
 /**

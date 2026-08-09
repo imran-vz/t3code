@@ -13,6 +13,7 @@ import {
   setServerExposureMode,
   setTailscaleServeEnabled,
 } from "./methods/serverExposure.ts";
+import * as SpeechIpc from "./methods/speech.ts";
 import {
   bootstrapSshBearerSession,
   disconnectSshEnvironment,
@@ -48,6 +49,7 @@ import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./m
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* PreviewIpc.installPreviewEventForwarding();
+  yield* SpeechIpc.installSpeechStateForwarding();
 
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getWindowFullscreenState);
@@ -92,5 +94,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(checkForUpdate);
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
+  }
+  for (const speechMethod of SpeechIpc.methods) {
+    yield* ipc.handle(speechMethod);
   }
 });

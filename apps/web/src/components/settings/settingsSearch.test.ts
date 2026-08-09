@@ -60,6 +60,16 @@ describe("searchSettings", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
   });
 
+  it("gates desktop voice input search results on the speech capability", () => {
+    expect(searchSettings("voice input")).toEqual([]);
+    expect(searchSettings("voice input", SETTINGS_SEARCH_ITEMS, { speech: true })).toEqual([
+      expect.objectContaining({
+        id: "voice-input",
+        to: "/settings/voice-input",
+      }),
+    ]);
+  });
+
   it("keeps catalog result ids unique", () => {
     const ids = SETTINGS_SEARCH_ITEMS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);

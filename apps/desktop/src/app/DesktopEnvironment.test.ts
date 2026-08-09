@@ -63,6 +63,8 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
+      assert.equal(environment.speechModelsDir, "/tmp/t3/userdata/speech-models");
+      assert.equal(environment.speechTemporaryDir, "/tmp/t3/userdata/speech-temporary");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
@@ -94,6 +96,8 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.stateDir, "/tmp/t3/userdata");
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
+      assert.equal(environment.speechModelsDir, "/tmp/t3/userdata/speech-models");
+      assert.equal(environment.speechTemporaryDir, "/tmp/t3/userdata/speech-temporary");
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
     }),
   );

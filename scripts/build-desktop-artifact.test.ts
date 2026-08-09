@@ -13,6 +13,7 @@ import {
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
+  DESKTOP_SPEECH_WORKER_ASAR_UNPACK,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
@@ -42,10 +43,12 @@ import {
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
   STAGE_INSTALL_ARGS,
+  TRANSCRIBE_CPP_ASAR_UNPACK,
   WINDOWS_ASAR_UNPACK,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { DESKTOP_MICROPHONE_USAGE_DESCRIPTION } from "@t3tools/shared/desktopSpeechConstants";
 
 function mockProcess(exitCode: number) {
   return ChildProcessSpawner.makeHandle({
@@ -166,15 +169,18 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           "@t3tools/tailscale": "workspace:*",
           effect: "catalog:",
           electron: "41.5.0",
+          "transcribe-cpp": "catalog:",
         },
         {
           "@effect/platform-node": "4.0.0-beta.59",
           effect: "4.0.0-beta.59",
+          "transcribe-cpp": "0.1.3",
         },
       ),
       {
         "@effect/platform-node": "4.0.0-beta.59",
         effect: "4.0.0-beta.59",
+        "transcribe-cpp": "0.1.3",
       },
     );
   });
@@ -221,10 +227,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         cpu: ["x64"],
       },
     });
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "arm64" }), {
+      supportedArchitectures: {
+        os: ["darwin"],
+        cpu: ["arm64"],
+      },
+    });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "x64" }), {
       supportedArchitectures: {
         os: ["linux"],
         cpu: ["x64"],
+        libc: ["glibc"],
+      },
+    });
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "arm64" }), {
+      supportedArchitectures: {
+        os: ["linux"],
+        cpu: ["arm64"],
         libc: ["glibc"],
       },
     });
@@ -346,9 +365,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
-      assert.notProperty(mac, "asarUnpack");
-      assert.notProperty(linux, "asarUnpack");
-      assert.deepStrictEqual(win.asarUnpack, WINDOWS_ASAR_UNPACK);
+      const speechAsarUnpack = [
+        ...DESKTOP_SPEECH_WORKER_ASAR_UNPACK,
+        ...TRANSCRIBE_CPP_ASAR_UNPACK,
+      ];
+      assert.deepStrictEqual(mac.asarUnpack, speechAsarUnpack);
+      assert.deepStrictEqual(linux.asarUnpack, speechAsarUnpack);
+      assert.deepStrictEqual(win.asarUnpack, [...speechAsarUnpack, ...WINDOWS_ASAR_UNPACK]);
       // Linux must register the renderer schemes so the generated .desktop
       // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
@@ -516,21 +539,34 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.notInclude(error.message, secret);
   });
 
-  it.effect("adds passkey entitlements and both renderer protocols to signed macOS builds", () =>
-    Effect.gen(function* () {
-      const config = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined, {
-        entitlementsPath: "/tmp/entitlements.mac.plist",
-        provisioningProfilePath: "/tmp/t3code.provisionprofile",
-      });
+  it.effect(
+    "adds microphone metadata, passkey entitlements, and renderer protocols to macOS builds",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined, {
+          entitlementsPath: "/tmp/entitlements.mac.plist",
+          provisioningProfilePath: "/tmp/t3code.provisionprofile",
+        });
 
-      const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.t3tools.t3code");
-      assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
-      assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
-      assert.deepStrictEqual(mac.protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
-      ]);
-    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+        const mac = config.mac as Record<string, unknown>;
+        assert.equal(config.appId, "com.t3tools.t3code");
+        assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
+        assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
+        assert.deepStrictEqual(mac.extendInfo, {
+          NSMicrophoneUsageDescription: DESKTOP_MICROPHONE_USAGE_DESCRIPTION,
+        });
+        assert.deepStrictEqual(mac.protocols, [
+          { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        ]);
+
+        const entitlements = renderMacPasskeyEntitlements({
+          appId: "com.t3tools.t3code",
+          teamId: "ABC1234567",
+          rpDomains: ["example.clerk.accounts.dev"],
+          provisioningProfilePath: "/tmp/t3code.provisionprofile",
+        });
+        assert.include(entitlements, "com.apple.security.device.audio-input");
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
